@@ -29,6 +29,9 @@ class ConnectMyPoolEntity(CoordinatorEntity[ConnectMyPoolCoordinator]):
 
         self._attr_name = name
         self._attr_unique_id = f"{self._pool_id}_{unique_suffix}"
+        # Provide a deterministic entity_id base (users can still rename).
+        # This helps avoid a wall of generic names (e.g., multiple "Pool") becoming confusing entity_ids.
+        self._attr_suggested_object_id = f"connectmypool_{unique_suffix}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._pool_id)},
             name="ConnectMyPool Pool",

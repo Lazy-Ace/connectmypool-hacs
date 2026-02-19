@@ -9,6 +9,9 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers import entity_registry as er
+from homeassistant.components import persistent_notification
+from homeassistant.util import slugify
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.exceptions import ConfigEntryNotReady, ConfigEntryAuthFailed
 
@@ -114,6 +117,7 @@ def _apply_unique_friendly_names(pool_config: dict[str, Any]) -> None:
     apply("lighting_zones", "name", "lighting_zone_number", "Lighting Zone")
 
 SERVICE_SEND_ACTION = "send_action"
+SERVICE_APPLY_ENTITY_ID_PREFIX = "apply_entity_id_prefix"
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:

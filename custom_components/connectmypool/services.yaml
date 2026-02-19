@@ -42,3 +42,23 @@ send_action:
       example: true
       selector:
         boolean:
+apply_entity_id_prefix:
+  name: Apply entity_id prefix
+  description: >-
+    Rename ConnectMyPool entities in the entity registry to include a prefix (e.g. connectmypool_*).
+    This is useful if your entities were created without a consistent prefix.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      description: Optional. If you have multiple pools configured, specify which one.
+      example: "abcd1234efgh5678"
+    prefix:
+      name: Prefix
+      description: Prefix to apply to entity IDs (will be slugified).
+      example: "connectmypool"
+      default: "connectmypool"
+    dry_run:
+      name: Dry run
+      description: If true, only shows what would change (creates a persistent notification).
+      default: true
+      example: true

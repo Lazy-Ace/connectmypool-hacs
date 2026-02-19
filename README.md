@@ -53,3 +53,8 @@ In **Settings → Devices & Services → ConnectMyPool → Configure**:
 ---
 
 **Disclaimer:** This is an unofficial community integration. You use it at your own risk.
+
+
+## Entity ID prefix helper
+
+This integration includes a service `connectmypool.apply_entity_id_prefix` that can rename the integration's entities in your entity registry to include a prefix (default: `connectmypool_`). Run it once with `dry_run: true` to preview, then again with `dry_run: false` to apply.
