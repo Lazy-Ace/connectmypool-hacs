@@ -33,7 +33,7 @@ class ConnectMyPoolSolarWaterHeater(ConnectMyPoolEntity, WaterHeaterEntity):
         self._api = api
         self._wait = bool(wait_for_execution)
         self._solar_number = int(solar_cfg.get("solar_number", 1))
-        name = solar_cfg.get("name") or (f"Solar {self._solar_number}" if self._solar_number != 1 else "Solar")
+        name = solar_cfg.get("friendly_name") or solar_cfg.get("name") or (f"Solar {self._solar_number}" if self._solar_number != 1 else "Solar")
         super().__init__(coordinator, name, f"solar_{self._solar_number}")
 
     def _unit(self) -> str:

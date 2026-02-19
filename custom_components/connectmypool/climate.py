@@ -49,7 +49,7 @@ class ConnectMyPoolHeaterClimate(ConnectMyPoolEntity, ClimateEntity):
         self._wait = bool(wait_for_execution)
         self._cfg = cfg
         self._heater_number = int(heater_cfg.get("heater_number", 1))
-        name = heater_cfg.get("name") or (f"Heater {self._heater_number}" if self._heater_number != 1 else "Heater")
+        name = heater_cfg.get("friendly_name") or heater_cfg.get("name") or (f"Heater {self._heater_number}" if self._heater_number != 1 else "Heater")
         super().__init__(coordinator, name, f"heater_{self._heater_number}")
 
         self._heat_cool_enabled = bool(cfg.get("heat_cool_selection_enabled"))

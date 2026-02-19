@@ -83,7 +83,7 @@ class _BaseSetpointNumber(ConnectMyPoolEntity, NumberEntity):
 class HeaterSetpointNumber(_BaseSetpointNumber):
     def __init__(self, coordinator, api, wait_for_execution, heater_cfg: dict[str, Any]) -> None:
         hn = int(heater_cfg.get("heater_number", 1))
-        name = heater_cfg.get("name") or (f"Heater {hn} Setpoint")
+        name = heater_cfg.get("friendly_name") or heater_cfg.get("name") or (f"Heater {hn} Setpoint")
         super().__init__(coordinator, api, wait_for_execution, name, f"heater_{hn}_setpoint", hn, ACTION_SET_HEATER_SET_TEMP)
 
     @property
@@ -101,7 +101,7 @@ class HeaterSetpointNumber(_BaseSetpointNumber):
 class SolarSetpointNumber(_BaseSetpointNumber):
     def __init__(self, coordinator, api, wait_for_execution, solar_cfg: dict[str, Any]) -> None:
         sn = int(solar_cfg.get("solar_number", 1))
-        name = solar_cfg.get("name") or (f"Solar {sn} Setpoint")
+        name = solar_cfg.get("friendly_name") or solar_cfg.get("name") or (f"Solar {sn} Setpoint")
         super().__init__(coordinator, api, wait_for_execution, name, f"solar_{sn}_setpoint", sn, ACTION_SET_SOLAR_SET_TEMP)
 
     @property

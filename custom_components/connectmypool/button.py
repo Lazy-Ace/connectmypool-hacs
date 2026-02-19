@@ -32,7 +32,7 @@ class LightingZoneSyncButton(ConnectMyPoolEntity, ButtonEntity):
         self._api = api
         self._wait = bool(wait_for_execution)
         self._lz_number = int(lz["lighting_zone_number"])
-        name = (lz.get("name") or f"Lighting Zone {self._lz_number}") + " Color Sync"
+        name = (lz.get("friendly_name") or lz.get("name") or f"Lighting Zone {self._lz_number}") + " Color Sync"
         super().__init__(coordinator, name, f"lightzone_{self._lz_number}_color_sync")
 
     async def async_press(self) -> None:

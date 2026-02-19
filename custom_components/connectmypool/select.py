@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity import EntityCategory
 
 from .api import ConnectMyPoolApi, ConnectMyPoolError
 from .const import (
@@ -173,10 +174,13 @@ class ActiveFavouriteSelect(_BaseSelect):
 
 
 class ChannelModeSelect(_BaseSelect):
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_entity_registry_enabled_default = False
+
     def __init__(self, coordinator, api, wait_for_execution, ch: dict[str, Any]) -> None:
         self._channel_number = int(ch["channel_number"])
         self._function = ch.get("function")
-        friendly = ch.get("name") or f"Channel {self._channel_number}"
+        friendly = ch.get("friendly_name") or ch.get("name") or f"Channel {self._channel_number}"
         super().__init__(coordinator, api, wait_for_execution, f"{friendly} Mode", f"channel_{self._channel_number}_mode")
 
         # Best-effort options (API cycles channel modes; device may support a subset).
@@ -225,12 +229,15 @@ class ChannelModeSelect(_BaseSelect):
 
 
 class ValveModeSelect(_BaseSelect):
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_entity_registry_enabled_default = False
+
     _attr_options = list(TRI_MODES.values())
 
     def __init__(self, coordinator, api, wait_for_execution, valve: dict[str, Any]) -> None:
         self._valve_number = int(valve["valve_number"])
         self._function = valve.get("function")
-        friendly = valve.get("name") or f"Valve {self._valve_number}"
+        friendly = valve.get("friendly_name") or valve.get("name") or f"Valve {self._valve_number}"
         super().__init__(coordinator, api, wait_for_execution, f"{friendly} Mode", f"valve_{self._valve_number}_mode")
 
     def _find_mode(self) -> Optional[int]:
@@ -264,6 +271,9 @@ class ValveModeSelect(_BaseSelect):
 
 
 class SolarModeSelect(_BaseSelect):
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_entity_registry_enabled_default = False
+
     _attr_options = list(TRI_MODES.values())
 
     def __init__(self, coordinator, api, wait_for_execution, solar: dict[str, Any]) -> None:
@@ -299,6 +309,9 @@ class SolarModeSelect(_BaseSelect):
 
 
 class LightingZoneModeSelect(_BaseSelect):
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_entity_registry_enabled_default = False
+
     _attr_options = list(TRI_MODES.values())
 
     def __init__(self, coordinator, api, wait_for_execution, lz: dict[str, Any]) -> None:

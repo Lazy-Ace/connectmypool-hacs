@@ -39,7 +39,7 @@ class ChannelSwitch(ConnectMyPoolEntity, SwitchEntity):
         self._wait = bool(wait_for_execution)
         self._channel_number = int(ch["channel_number"])
         self._function = ch.get("function")
-        friendly = ch.get("name") or f"Channel {self._channel_number}"
+        friendly = ch.get("friendly_name") or ch.get("name") or f"Channel {self._channel_number}"
         super().__init__(coordinator, friendly, f"channel_{self._channel_number}_switch")
 
     def _find_mode(self) -> Optional[int]:

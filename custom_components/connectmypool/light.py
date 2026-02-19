@@ -34,7 +34,7 @@ class LightingZoneLight(ConnectMyPoolEntity, LightEntity):
         self._lz_number = int(lz["lighting_zone_number"])
         self._color_enabled = bool(lz.get("color_enabled", False))
 
-        name = lz.get("name") or f"Lighting Zone {self._lz_number}"
+        name = lz.get("friendly_name") or lz.get("name") or f"Lighting Zone {self._lz_number}"
         super().__init__(coordinator, name, f"lightzone_{self._lz_number}")
 
         # Effect list from config

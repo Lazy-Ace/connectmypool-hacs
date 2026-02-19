@@ -1,9 +1,9 @@
 {
-  "domain": "connectmypool",
-  "name": "ConnectMyPool",
-  "version": "1.0.0",
-  "documentation": "https://www.connectmypool.com.au/",
   "config_flow": true,
+  "documentation": "https://www.connectmypool.com.au/",
+  "domain": "connectmypool",
   "iot_class": "cloud_polling",
-  "requirements": []
+  "name": "ConnectMyPool",
+  "requirements": [],
+  "version": "1.0.2"
 }
