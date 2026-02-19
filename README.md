@@ -1,43 +1,55 @@
-# ConnectMyPool (Astral Pool) — Home Assistant Custom Integration (HACS)
+# ConnectMyPool (Home Assistant / HACS)
 
-This is a **custom** Home Assistant integration for Astral Pool **ConnectMyPool** cloud API (`connectmypool.com.au`).
+A polished Home Assistant custom integration for **AstralPool ConnectMyPool**.
 
-## Features (v0.1.0)
-- Discovers your pool devices via `/api/poolconfig`
-- Polls live state via `/api/poolstatus` (cloud polling)
-- Entities:
-  - Water temperature sensor
-  - Selects for:
-    - Channel modes (best-effort; API cycles modes)
-    - Valve mode (Off/Auto/On)
-    - Lighting zone mode (Off/Auto/On)
-    - Pool/Spa selection (if supported)
-    - Heat/Cool selection (if supported)
-    - Solar mode (Off/Auto/On)
-    - Active favourite
-  - Numbers for:
-    - Heater setpoint
-    - Solar setpoint
-  - Light entity per lighting zone (On/Off + effects where available)
-  - Button to re-sync lighting colour (where supported)
+It talks to the official ConnectMyPool cloud endpoints documented in the *Home Automation Integration Guide* (PoolConfig/PoolStatus/PoolAction).
 
-## Requirements
-- Your pool must be approved for API access in ConnectMyPool and you must have a **Pool API Code** (shown under *Settings → Home Automation* after approval).
+## What you get
 
-## Install via HACS (custom repository)
-1. Push this repository to GitHub (public or private).
+- **Pool water temperature** sensor
+- **Channel controls**
+  - `select` entities for **channel mode** (Off/Auto/On/Speed modes)
+  - Optional convenience `switch` entities for quick On/Off (enabled by default)
+- **Valve mode** selects (Off/Auto/On)
+- **Lighting**
+  - `light` entities (On/Off + optional effects/patterns)
+  - Separate lighting **Mode** select (Off/Auto/On) because “Auto” doesn’t fit the light model cleanly
+  - “Color Sync” diagnostic button (matches the official action)
+- **Heater** as a proper `climate` entity (Off/Heat/Cool where supported)
+- **Solar** as a proper `water_heater` entity (Off/Auto/On + setpoint)
+- Advanced service: `connectmypool.send_action` (raw action code access)
+
+## Important note: API throttle
+
+The ConnectMyPool cloud throttles **poolconfig** and **poolstatus** to about **one response per 60 seconds**, except for ~5 minutes after an instruction is sent.
+
+This integration is designed around that: default scan interval is 60s, and it uses cached data if the cloud replies with a throttle error.
+
+## Install (recommended via HACS)
+
+1. Create a GitHub repo and copy this code into it (or unzip the provided zip and push it).
 2. In Home Assistant: **HACS → Integrations → ⋮ → Custom repositories**
-3. Paste your repo URL, choose **Integration**, click **Add**.
-4. Install, restart Home Assistant.
-5. Add integration: **Settings → Devices & services → Add integration → ConnectMyPool**
+3. Add your repo URL and select **Integration**
+4. Install **ConnectMyPool**, then restart Home Assistant.
+5. Add the integration via **Settings → Devices & Services → Add Integration → ConnectMyPool**
+6. Enter your **Pool API Code** (from the ConnectMyPool app), choose °C/°F if needed.
 
-## Notes / Caveats
-- The ConnectMyPool API is rate-limited (the official guide mentions ~60s throttling). Keep polling conservative.
-- Some channels (e.g., multi-speed pumps) cannot be set directly; the API can **only cycle** a channel’s mode. The integration attempts to reach the requested mode by cycling and checking status, but this is inherently “best effort”.
+## Options
+
+In **Settings → Devices & Services → ConnectMyPool → Configure**:
+
+- Scan interval (60–3600 seconds)
+- Wait for execution (recommended ON; avoids UI “flip-flop”)
+- Expose channel switches (ON/OFF convenience toggles)
+- Expose legacy setpoint numbers (diagnostic; usually unnecessary with climate/water_heater entities)
+- Base URL (only change if you’re explicitly told to)
 
 ## Troubleshooting
-- If you get “API Not Enabled” or similar, re-check that Astral have approved API access for your pool and that the Pool API Code is correct.
-- If you hit throttling errors, increase the polling interval in the integration options.
 
-## Disclaimer
-This is not an official integration. Use at your own risk.
+- If entities “snap back”: enable **Wait for execution** and keep scan interval ≥ 60s.
+- If you see “Pool not connected”: the controller isn’t currently connected to ConnectMyPool’s cloud (Wi‑Fi / gateway / service issue).
+- Diagnostics: **Settings → Devices & Services → ConnectMyPool → Download diagnostics** (API code is redacted).
+
+---
+
+**Disclaimer:** This is an unofficial community integration. You use it at your own risk.

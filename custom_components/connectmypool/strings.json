@@ -3,16 +3,16 @@
     "step": {
       "user": {
         "title": "ConnectMyPool",
-        "description": "Enter your ConnectMyPool Pool API Code (Settings \u2192 Home Automation).",
+        "description": "Enter your ConnectMyPool Pool API Code (ConnectMyPool app \u2192 Settings \u2192 Home Automation).",
         "data": {
           "pool_api_code": "Pool API Code",
           "base_url": "Base URL",
-          "temperature_scale": "Temperature scale (0=C, 1=F)"
+          "temperature_scale": "Temperature scale (0 = \u00b0C, 1 = \u00b0F)"
         }
       }
     },
     "error": {
-      "invalid_auth": "Invalid API code or API not enabled.",
+      "invalid_auth": "Invalid API code, or Home Automation API not enabled.",
       "cannot_connect": "Failed to connect to ConnectMyPool.",
       "unknown": "Unexpected error."
     }
@@ -21,10 +21,13 @@
     "step": {
       "init": {
         "title": "ConnectMyPool options",
+        "description": "Note: ConnectMyPool cloud status/config calls are throttled to ~60 seconds.",
         "data": {
           "scan_interval": "Polling interval (seconds)",
-          "wait_for_execution": "Wait for execution (may be slower)",
-          "temperature_scale": "Temperature scale (0=C, 1=F)",
+          "wait_for_execution": "Wait for execution (recommended)",
+          "expose_channel_switches": "Expose channel ON/OFF switches",
+          "expose_setpoint_numbers": "Expose legacy setpoint numbers (diagnostic)",
+          "temperature_scale": "Temperature scale (0 = \u00b0C, 1 = \u00b0F)",
           "base_url": "Base URL"
         }
       }
