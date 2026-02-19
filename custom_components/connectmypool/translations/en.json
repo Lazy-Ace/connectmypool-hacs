@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "ConnectMyPool",
+        "description": "Enter your ConnectMyPool Pool API Code (Settings \u2192 Home Automation).",
+        "data": {
+          "pool_api_code": "Pool API Code",
+          "base_url": "Base URL",
+          "temperature_scale": "Temperature scale (0=C, 1=F)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid API code or API not enabled.",
+      "cannot_connect": "Failed to connect to ConnectMyPool.",
+      "unknown": "Unexpected error."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ConnectMyPool options",
+        "data": {
+          "scan_interval": "Polling interval (seconds)",
+          "wait_for_execution": "Wait for execution (may be slower)",
+          "temperature_scale": "Temperature scale (0=C, 1=F)",
+          "base_url": "Base URL"
+        }
+      }
+    }
+  }
+}

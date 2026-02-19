@@ -1,0 +1,7 @@
+{
+  "name": "ConnectMyPool",
+  "content_in_root": false,
+  "render_readme": true,
+  "hide_default_branch": false,
+  "zip_release": false
+}
