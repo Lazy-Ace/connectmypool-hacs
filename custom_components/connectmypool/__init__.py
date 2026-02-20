@@ -128,10 +128,24 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
 
 
 def _async_setup_services(hass: HomeAssistant) -> None:
+    """Register service actions."""
     if hass.data[DOMAIN].get("_services_setup"):
         return
 
-    schema = vol.Schema(
+    def _resolve_entry_id(call: ServiceCall) -> str:
+        entry_id = call.data.get("config_entry_id")
+        entries = hass.data.get(DOMAIN, {})
+        if entry_id is None:
+            configured = [k for k in entries.keys() if not str(k).startswith("_")]
+            if len(configured) == 1:
+                entry_id = configured[0]
+            else:
+                raise ValueError("Multiple ConnectMyPool entries; provide config_entry_id")
+        if entry_id not in hass.data[DOMAIN]:
+            raise ValueError(f"Unknown config_entry_id: {entry_id}")
+        return str(entry_id)
+
+    send_action_schema = vol.Schema(
         {
             vol.Optional("config_entry_id"): str,
             vol.Required("action_code"): int,
@@ -142,19 +156,8 @@ def _async_setup_services(hass: HomeAssistant) -> None:
     )
 
     async def _handle_send_action(call: ServiceCall) -> None:
-        entry_id = call.data.get("config_entry_id")
-        entries = hass.data.get(DOMAIN, {})
-        if entry_id is None:
-            # If only one pool configured, use it.
-            configured = [k for k in entries.keys() if not str(k).startswith("_")]
-            if len(configured) == 1:
-                entry_id = configured[0]
-            else:
-                raise ValueError("Multiple ConnectMyPool entries; provide config_entry_id")
-
-        data = hass.data[DOMAIN].get(entry_id)
-        if not data:
-            raise ValueError(f"Unknown config_entry_id: {entry_id}")
+        entry_id = _resolve_entry_id(call)
+        data = hass.data[DOMAIN][entry_id]
 
         coordinator: ConnectMyPoolCoordinator = data["coordinator"]
         api: ConnectMyPoolApi = data["api"]
@@ -172,7 +175,72 @@ def _async_setup_services(hass: HomeAssistant) -> None:
         await asyncio.sleep(1.5)
         await coordinator.async_request_refresh()
 
-    hass.services.async_register(DOMAIN, SERVICE_SEND_ACTION, _handle_send_action, schema=schema)
+    apply_prefix_schema = vol.Schema(
+        {
+            vol.Optional("config_entry_id"): str,
+            vol.Optional("prefix", default="connectmypool"): str,
+            vol.Optional("dry_run", default=True): bool,
+        }
+    )
+
+    async def _handle_apply_entity_id_prefix(call: ServiceCall) -> None:
+        entry_id = _resolve_entry_id(call)
+        prefix = slugify(str(call.data.get("prefix") or "connectmypool"))
+        dry_run = bool(call.data.get("dry_run", True))
+
+        ent_reg = er.async_get(hass)
+
+        def _belongs(reg_entry) -> bool:
+            # Prefer exact platform match; also require config entry association.
+            if getattr(reg_entry, "platform", None) != DOMAIN:
+                return False
+            cfg_id = getattr(reg_entry, "config_entry_id", None)
+            if cfg_id == entry_id:
+                return True
+            cfg_ids = getattr(reg_entry, "config_entry_ids", None)
+            if cfg_ids and entry_id in cfg_ids:
+                return True
+            return False
+
+        existing = set(ent_reg.entities)
+        changes: list[tuple[str, str]] = []
+
+        for reg_entry in ent_reg.entities.values():
+            if not _belongs(reg_entry):
+                continue
+            old = reg_entry.entity_id
+            if "." not in old:
+                continue
+            domain, obj = old.split(".", 1)
+            if obj.startswith(prefix + "_"):
+                continue
+
+            base = f"{domain}.{prefix}_{obj}"
+            new = base
+            i = 2
+            while new in existing and new != old:
+                new = f"{base}_{i}"
+                i += 1
+
+            if new != old:
+                changes.append((old, new))
+                existing.add(new)
+        if not changes:
+            persistent_notification.async_create(hass,'No changes needed',title='ConnectMyPool entity_id prefix');return
+        m='\n'.join([f'{o}->{n}' for o,n in changes])
+        if dry_run:
+            persistent_notification.async_create(hass,f'Dry run {len(changes)}\n{m}',title='ConnectMyPool entity_id prefix');return
+        for o,n in changes: ent_reg.async_update_entity(o,new_entity_id=n)
+        persistent_notification.async_create(hass,f'Renamed {len(changes)}\n{m}',title='ConnectMyPool entity_id prefix')
+
+    hass.services.async_register(DOMAIN, SERVICE_SEND_ACTION, _handle_send_action, schema=send_action_schema)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_APPLY_ENTITY_ID_PREFIX,
+        _handle_apply_entity_id_prefix,
+        schema=apply_prefix_schema,
+    )
+
     hass.data[DOMAIN]["_services_setup"] = True
 
 
