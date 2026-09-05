@@ -25,6 +25,17 @@ from .const import (
 from .entity import ConnectMyPoolEntity
 
 
+FILTER_PUMP_FUNCTION = 1
+FILTER_PUMP_CYCLE = (0, 1, 4, 5)  # Off -> Auto -> Medium -> High -> Off
+
+
+def _is_filter_pump_channel(ch: dict[str, Any]) -> bool:
+    try:
+        return int(ch.get("function")) == FILTER_PUMP_FUNCTION
+    except (TypeError, ValueError):
+        return False
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
@@ -45,9 +56,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
     if favs:
         entities.append(ActiveFavouriteSelect(coordinator, api, wait_for_execution, favs))
 
-    # Channels (mode select)
+    # A multi-speed filter pump is a multi-state device, not an ON/OFF switch.
+    # Function 1 is the ConnectMyPool filter-pump function. The Viron two-speed
+    # controller cycles Off -> Auto -> Medium -> High -> Off.
     for ch in (cfg.get("channels") or []):
-        entities.append(ChannelModeSelect(coordinator, api, wait_for_execution, ch))
+        if _is_filter_pump_channel(ch):
+            entities.append(ChannelModeSelect(coordinator, api, wait_for_execution, ch))
 
     # Valves
     for v in (cfg.get("valves") or []):
@@ -174,17 +188,14 @@ class ActiveFavouriteSelect(_BaseSelect):
 
 
 class ChannelModeSelect(_BaseSelect):
-    _attr_entity_category = EntityCategory.CONFIG
-    _attr_entity_registry_enabled_default = False
+    """Verified four-state selector for the Viron filter pump."""
 
     def __init__(self, coordinator, api, wait_for_execution, ch: dict[str, Any]) -> None:
         self._channel_number = int(ch["channel_number"])
         self._function = ch.get("function")
         friendly = ch.get("friendly_name") or ch.get("name") or f"Channel {self._channel_number}"
         super().__init__(coordinator, api, wait_for_execution, f"{friendly} Mode", f"channel_{self._channel_number}_mode")
-
-        # Best-effort options (API cycles channel modes; device may support a subset).
-        self._attr_options = list(CHANNEL_MODES.values())
+        self._attr_options = [CHANNEL_MODES[mode] for mode in FILTER_PUMP_CYCLE]
 
     def _find_mode(self) -> Optional[int]:
         for c in (self.data.get("channels") or []):
@@ -202,29 +213,78 @@ class ChannelModeSelect(_BaseSelect):
             return None
         return CHANNEL_MODES.get(mode, str(mode))
 
+    async def _verify_mode(self, expected: int) -> int | None:
+        """Give the cloud/controller a little time to report the post-cycle state."""
+        for attempt in range(3):
+            observed = self._find_mode()
+            if observed == expected:
+                return observed
+            if attempt < 2:
+                await asyncio.sleep(0.8)
+                await self.coordinator.async_request_refresh()
+        return self._find_mode()
+
     async def async_select_option(self, option: str) -> None:
-        desired = next((k for k, v in CHANNEL_MODES.items() if v == option), None)
-        if desired is None:
-            raise HomeAssistantError(f"Unsupported option: {option}")
-
-        # Cycle until we hit the requested mode (up to 8 attempts).
-        for _ in range(8):
-            current = self._find_mode()
-            if current == desired:
-                return
-            await self._do_action(ACTION_CYCLE_CHANNEL, device_number=self._channel_number, value="")
-            await asyncio.sleep(0.8)
-            await self.coordinator.async_request_refresh()
-
-        raise HomeAssistantError(
-            f"Couldn't reach mode '{option}' by cycling. This channel may not support that mode."
+        desired = next(
+            (mode for mode in FILTER_PUMP_CYCLE if CHANNEL_MODES[mode] == option),
+            None,
         )
+        if desired is None:
+            raise HomeAssistantError(f"Unsupported filter-pump mode: {option}")
+
+        current = self._find_mode()
+        if current is None:
+            await self.coordinator.async_request_refresh()
+            current = self._find_mode()
+
+        if current not in FILTER_PUMP_CYCLE:
+            label = CHANNEL_MODES.get(current, str(current)) if current is not None else "unknown"
+            raise HomeAssistantError(
+                f"Filter pump reported unexpected mode '{label}'. "
+                "Refusing to cycle blindly."
+            )
+
+        if current == desired:
+            return
+
+        current_index = FILTER_PUMP_CYCLE.index(current)
+        desired_index = FILTER_PUMP_CYCLE.index(desired)
+        steps = (desired_index - current_index) % len(FILTER_PUMP_CYCLE)
+
+        for offset in range(1, steps + 1):
+            expected = FILTER_PUMP_CYCLE[(current_index + offset) % len(FILTER_PUMP_CYCLE)]
+            await self._do_action(
+                ACTION_CYCLE_CHANNEL,
+                device_number=self._channel_number,
+                value="",
+            )
+
+            observed = await self._verify_mode(expected)
+            if observed != expected:
+                expected_label = CHANNEL_MODES[expected]
+                observed_label = (
+                    CHANNEL_MODES.get(observed, str(observed))
+                    if observed is not None
+                    else "unknown"
+                )
+                raise HomeAssistantError(
+                    f"Filter pump cycle verification failed: "
+                    f"expected '{expected_label}', controller reported '{observed_label}'. "
+                    "Stopped to avoid cycling into the wrong mode."
+                )
+
+        final = self._find_mode()
+        if final != desired:
+            raise HomeAssistantError(
+                f"Couldn't confirm filter pump mode '{option}'."
+            )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             "channel_number": self._channel_number,
             "function": self._function,
+            "cycle_sequence": [CHANNEL_MODES[mode] for mode in FILTER_PUMP_CYCLE],
         }
 
 
