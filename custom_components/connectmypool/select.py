@@ -188,11 +188,20 @@ class ActiveFavouriteSelect(_BaseSelect):
 
 
 class ChannelModeSelect(_BaseSelect):
-    """Verified four-state selector for the Viron filter pump."""
+    """Reliable four-state selector for the Viron filter pump.
+
+    ConnectMyPool only exposes a cycle action.  Multiple rapid selections used
+    to interleave separate cycle/refresh loops and could generate a burst of
+    poolstatus calls.  A per-entity operation lock now serialises the complete
+    mode change, while latest-request coalescing makes rapid UI changes converge
+    on the user's most recent selection.
+    """
 
     def __init__(self, coordinator, api, wait_for_execution, ch: dict[str, Any]) -> None:
         self._channel_number = int(ch["channel_number"])
         self._function = ch.get("function")
+        self._mode_lock = asyncio.Lock()
+        self._latest_requested: int | None = None
         friendly = ch.get("friendly_name") or ch.get("name") or f"Channel {self._channel_number}"
         super().__init__(coordinator, api, wait_for_execution, f"{friendly} Mode", f"channel_{self._channel_number}_mode")
         self._attr_options = [CHANNEL_MODES[mode] for mode in FILTER_PUMP_CYCLE]
@@ -213,29 +222,29 @@ class ChannelModeSelect(_BaseSelect):
             return None
         return CHANNEL_MODES.get(mode, str(mode))
 
-    async def _verify_mode(self, expected: int) -> int | None:
-        """Give the cloud/controller a little time to report the post-cycle state."""
-        for attempt in range(3):
-            observed = self._find_mode()
-            if observed == expected:
-                return observed
-            if attempt < 2:
-                await asyncio.sleep(0.8)
-                await self.coordinator.async_request_refresh()
+    async def _send_cycle(self, *, wait_for_execution: bool) -> None:
+        try:
+            await self._api.pool_action(
+                pool_api_code=self.coordinator.pool_api_code,
+                action_code=ACTION_CYCLE_CHANNEL,
+                device_number=self._channel_number,
+                value="",
+                temperature_scale=self.coordinator.temperature_scale,
+                wait_for_execution=wait_for_execution,
+            )
+        except ConnectMyPoolError as err:
+            raise HomeAssistantError(str(err)) from err
+
+    async def _refresh_and_read(self, delay: float) -> int | None:
+        if delay > 0:
+            await asyncio.sleep(delay)
+        await self.coordinator.async_request_refresh()
         return self._find_mode()
 
-    async def async_select_option(self, option: str) -> None:
-        desired = next(
-            (mode for mode in FILTER_PUMP_CYCLE if CHANNEL_MODES[mode] == option),
-            None,
-        )
-        if desired is None:
-            raise HomeAssistantError(f"Unsupported filter-pump mode: {option}")
-
+    async def _set_mode_locked(self, desired: int) -> None:
         current = self._find_mode()
         if current is None:
-            await self.coordinator.async_request_refresh()
-            current = self._find_mode()
+            current = await self._refresh_and_read(0)
 
         if current not in FILTER_PUMP_CYCLE:
             label = CHANNEL_MODES.get(current, str(current)) if current is not None else "unknown"
@@ -251,33 +260,61 @@ class ChannelModeSelect(_BaseSelect):
         desired_index = FILTER_PUMP_CYCLE.index(desired)
         steps = (desired_index - current_index) % len(FILTER_PUMP_CYCLE)
 
-        for offset in range(1, steps + 1):
-            expected = FILTER_PUMP_CYCLE[(current_index + offset) % len(FILTER_PUMP_CYCLE)]
-            await self._do_action(
-                ACTION_CYCLE_CHANNEL,
-                device_number=self._channel_number,
-                value="",
+        # Queue the required cycle actions with the cloud, but only wait for the
+        # final action.  This is considerably lighter than doing a poolstatus
+        # refresh after every intermediate step.
+        for step in range(steps):
+            is_final = step == steps - 1
+            await self._send_cycle(
+                wait_for_execution=self._wait if is_final else False,
             )
+            if not is_final:
+                # Small spacing avoids hammering the action endpoint while still
+                # allowing the controller to queue a short multi-step change.
+                await asyncio.sleep(0.2)
 
-            observed = await self._verify_mode(expected)
-            if observed != expected:
-                expected_label = CHANNEL_MODES[expected]
-                observed_label = (
-                    CHANNEL_MODES.get(observed, str(observed))
-                    if observed is not None
-                    else "unknown"
-                )
-                raise HomeAssistantError(
-                    f"Filter pump cycle verification failed: "
-                    f"expected '{expected_label}', controller reported '{observed_label}'. "
-                    "Stopped to avoid cycling into the wrong mode."
-                )
+        # One normal verification read, then one delayed retry for cloud/status
+        # propagation.  Never continue cycling based on an unverified state.
+        observed = await self._refresh_and_read(0.75)
+        if observed != desired:
+            observed = await self._refresh_and_read(1.5)
 
-        final = self._find_mode()
-        if final != desired:
+        if observed != desired:
+            desired_label = CHANNEL_MODES[desired]
+            observed_label = (
+                CHANNEL_MODES.get(observed, str(observed))
+                if observed is not None
+                else "unknown"
+            )
             raise HomeAssistantError(
-                f"Couldn't confirm filter pump mode '{option}'."
+                f"Couldn't confirm filter pump mode '{desired_label}'; "
+                f"controller reported '{observed_label}'. No further cycles were sent."
             )
+
+    async def async_select_option(self, option: str) -> None:
+        desired = next(
+            (mode for mode in FILTER_PUMP_CYCLE if CHANNEL_MODES[mode] == option),
+            None,
+        )
+        if desired is None:
+            raise HomeAssistantError(f"Unsupported filter-pump mode: {option}")
+
+        # Record the requested target before waiting for the lock. If the user
+        # changes the selector repeatedly, the active operation will converge on
+        # the most recent target instead of interleaving independent cycle loops.
+        self._latest_requested = desired
+
+        async with self._mode_lock:
+            while True:
+                target = self._latest_requested
+                if target is None:
+                    return
+
+                await self._set_mode_locked(target)
+
+                # If no newer request arrived while we were working, we're done.
+                if self._latest_requested == target:
+                    return
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
