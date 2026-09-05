@@ -18,7 +18,7 @@ from .entity import ConnectMyPoolEntity
 
 
 FILTER_PUMP_FUNCTION = 1
-SIMPLE_CHANNEL_MODES = {0, 1, 2}  # Off / Auto / On
+SIMPLE_CHANNEL_CYCLE = (0, 1, 2)  # Off -> Auto -> On -> Off
 
 
 def _is_filter_pump_channel(ch: dict[str, Any]) -> bool:
@@ -50,9 +50,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
 class ChannelSwitch(ConnectMyPoolEntity, SwitchEntity):
     """Manual ON/OFF control for a simple ConnectMyPool channel.
 
-    ConnectMyPool exposes a cycle action rather than a direct set-state action,
-    so we cycle and verify until the requested Off or On state is reported.
-    Auto is treated as neither manually On nor Off for control purposes.
+    The V10 cycles these channels Off -> Auto -> On -> Off.  Home Assistant's
+    switch represents the explicit manual On state; Auto is deliberately shown
+    as not manually on.  Changes are serialised and the required cycle actions
+    are batched before a single verification refresh to avoid unnecessary API
+    traffic.
     """
 
     def __init__(self, coordinator, api: ConnectMyPoolApi, wait_for_execution: bool, ch: dict[str, Any]) -> None:
@@ -60,6 +62,8 @@ class ChannelSwitch(ConnectMyPoolEntity, SwitchEntity):
         self._wait = bool(wait_for_execution)
         self._channel_number = int(ch["channel_number"])
         self._function = ch.get("function")
+        self._mode_lock = asyncio.Lock()
+        self._latest_target: int | None = None
         friendly = ch.get("friendly_name") or ch.get("name") or f"Channel {self._channel_number}"
         super().__init__(coordinator, friendly, f"channel_{self._channel_number}_switch")
 
@@ -83,7 +87,7 @@ class ChannelSwitch(ConnectMyPoolEntity, SwitchEntity):
             return False
         return None
 
-    async def _cycle_once(self) -> None:
+    async def _send_cycle(self, *, wait_for_execution: bool) -> None:
         try:
             await self._api.pool_action(
                 pool_api_code=self.coordinator.pool_api_code,
@@ -91,20 +95,23 @@ class ChannelSwitch(ConnectMyPoolEntity, SwitchEntity):
                 device_number=self._channel_number,
                 value="",
                 temperature_scale=self.coordinator.temperature_scale,
-                wait_for_execution=self._wait,
+                wait_for_execution=wait_for_execution,
             )
-            await asyncio.sleep(1.0)
-            await self.coordinator.async_request_refresh()
         except ConnectMyPoolError as err:
             raise HomeAssistantError(str(err)) from err
 
-    async def _cycle_to(self, target: int) -> None:
+    async def _refresh_and_read(self, delay: float) -> int | None:
+        if delay > 0:
+            await asyncio.sleep(delay)
+        await self.coordinator.async_request_refresh()
+        return self._find_mode()
+
+    async def _set_target_locked(self, target: int) -> None:
         current = self._find_mode()
         if current is None:
-            await self.coordinator.async_request_refresh()
-            current = self._find_mode()
+            current = await self._refresh_and_read(0)
 
-        if current not in SIMPLE_CHANNEL_MODES:
+        if current not in SIMPLE_CHANNEL_CYCLE:
             label = CHANNEL_MODES.get(current, str(current)) if current is not None else "unknown"
             raise HomeAssistantError(
                 f"Channel {self._channel_number} reported unexpected mode '{label}'. "
@@ -114,45 +121,50 @@ class ChannelSwitch(ConnectMyPoolEntity, SwitchEntity):
         if current == target:
             return
 
-        # Three states (Off/Auto/On) means no valid target can be more than
-        # two cycles away, but allow one extra attempt for controller quirks.
-        for _ in range(3):
-            previous = current
-            await self._cycle_once()
-            current = self._find_mode()
+        current_index = SIMPLE_CHANNEL_CYCLE.index(current)
+        target_index = SIMPLE_CHANNEL_CYCLE.index(target)
+        steps = (target_index - current_index) % len(SIMPLE_CHANNEL_CYCLE)
 
-            if current == target:
-                return
+        for step in range(steps):
+            is_final = step == steps - 1
+            await self._send_cycle(
+                wait_for_execution=self._wait if is_final else False,
+            )
+            if not is_final:
+                await asyncio.sleep(0.2)
 
-            if current == previous:
-                # One extra fresh read before declaring that the command did not move.
-                await asyncio.sleep(0.8)
-                await self.coordinator.async_request_refresh()
-                current = self._find_mode()
-                if current == target:
+        observed = await self._refresh_and_read(0.75)
+        if observed != target:
+            observed = await self._refresh_and_read(1.5)
+
+        if observed != target:
+            target_label = CHANNEL_MODES[target]
+            observed_label = (
+                CHANNEL_MODES.get(observed, str(observed))
+                if observed is not None
+                else "unknown"
+            )
+            raise HomeAssistantError(
+                f"Couldn't confirm channel {self._channel_number} in '{target_label}' mode; "
+                f"controller reported '{observed_label}'. No further cycles were sent."
+            )
+
+    async def _request_target(self, target: int) -> None:
+        self._latest_target = target
+        async with self._mode_lock:
+            while True:
+                requested = self._latest_target
+                if requested is None:
                     return
-                if current == previous:
-                    raise HomeAssistantError(
-                        f"Channel {self._channel_number} did not change state after a cycle command."
-                    )
-
-            if current not in SIMPLE_CHANNEL_MODES:
-                label = CHANNEL_MODES.get(current, str(current)) if current is not None else "unknown"
-                raise HomeAssistantError(
-                    f"Channel {self._channel_number} moved to unexpected mode '{label}'. "
-                    "Stopped to avoid cycling into the wrong state."
-                )
-
-        target_label = CHANNEL_MODES[target]
-        raise HomeAssistantError(
-            f"Couldn't confirm channel {self._channel_number} in '{target_label}' mode."
-        )
+                await self._set_target_locked(requested)
+                if self._latest_target == requested:
+                    return
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self._cycle_to(2)
+        await self._request_target(2)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._cycle_to(0)
+        await self._request_target(0)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -162,4 +174,5 @@ class ChannelSwitch(ConnectMyPoolEntity, SwitchEntity):
             "function": self._function,
             "mode": None if mode is None else int(mode),
             "mode_label": None if mode is None else CHANNEL_MODES.get(int(mode), str(mode)),
+            "cycle_sequence": [CHANNEL_MODES[mode] for mode in SIMPLE_CHANNEL_CYCLE],
         }
