@@ -8,8 +8,10 @@ It talks to the official ConnectMyPool cloud endpoints documented in the *Home A
 
 - **Pool water temperature** sensor
 - **Channel controls**
-  - `select` entities for **channel mode** (Off/Auto/On/Speed modes)
-  - Optional convenience `switch` entities for quick On/Off (enabled by default)
+  - Multi-speed **filter pump** as a proper mode selector
+  - For the Viron two-speed setup: **Off / Auto / Medium Speed / High Speed**
+  - Other simple channels (for example Spa Jets, Spa Blower and Heater Pump) as **On/Off switches**
+  - ConnectMyPool only exposes a channel-cycle command, so the integration reads the current mode, sends only the required cycles, and verifies the reported state after each command
 - **Valve mode** selects (Off/Auto/On)
 - **Lighting**
   - `light` entities (On/Off + optional effects/patterns)
@@ -40,13 +42,14 @@ In **Settings → Devices & Services → ConnectMyPool → Configure**:
 
 - Scan interval (60–3600 seconds)
 - Wait for execution (recommended ON; avoids UI “flip-flop”)
-- Expose channel switches (ON/OFF convenience toggles)
+- Expose channel switches (for non-filter ON/OFF channels)
 - Expose legacy setpoint numbers (diagnostic; usually unnecessary with climate/water_heater entities)
 - Base URL (only change if you’re explicitly told to)
 
 ## Troubleshooting
 
 - If entities “snap back”: enable **Wait for execution** and keep scan interval ≥ 60s.
+- If a filter-pump cycle does not produce the expected next mode, the integration stops rather than continuing to cycle blindly.
 - If you see “Pool not connected”: the controller isn’t currently connected to ConnectMyPool’s cloud (Wi‑Fi / gateway / service issue).
 - Diagnostics: **Settings → Devices & Services → ConnectMyPool → Download diagnostics** (API code is redacted).
 
