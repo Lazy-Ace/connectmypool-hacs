@@ -9,12 +9,12 @@ conversation history. Durable guidance is in the repo-root `CLAUDE.md`.
   `Lazy-Ace/lovelace-connectmypool-card`.
 - **Starting point:** commit `25275b9` ("Advertise ConnectMyPool 1.0.6 in HACS"),
   integration `manifest.json` version `1.0.6`.
-- **Working branch:** `fix/reliability-live-validation` (created off `25275b9`).
-- **Branch HEAD:** `dbc4a06`.
+- **Working branch:** `fix/reliability-live-validation` (created off `25275b9`),
+  **published to GitHub** (origin) — tip `7d4d4aa` plus this handoff-update commit.
 - **Status:** Diagnosis, patch, deploy, and live testing **COMPLETE and PASSING**.
-  Code is deployed to the live HA host and validated. **Not yet pushed to GitHub**
-  (see Outstanding). The branch *ref* exists on GitHub (at `main`'s SHA); the
-  commits exist only in the local clone + as a bundle (paths below).
+  Code is deployed to the live HA host and validated, and the branch is pushed to
+  GitHub (full commit history). Remaining: open a PR and squash-merge to `main`,
+  then the dashboard-card update.
 
 ## Live HA environment
 - HA host reachable at `http://192.168.1.50:8123`; Samba share `\\HOMEASSISTANT\config`
@@ -119,33 +119,23 @@ and `get_history`; each restored to original. Heater Pump never enabled/actuated
   currently faulty — treat as read-only.
 
 ## Not yet completed / Outstanding
-1. **Push the branch to GitHub.** `git push` from the dev machine hangs on the
-   Windows Credential Manager (non-interactive); the updated token is for the
-   GitHub API/MCP, not the git CLI. A full-history **git bundle** and patch are
-   staged (paths below). Resume options: (a) user runs `git push` from their own
-   terminal using the bundle; (b) push via GitHub API file-by-file with md5
-   verification against local.
+1. ~~Push the branch to GitHub.~~ **DONE** — branch `fix/reliability-live-validation`
+   is published to origin with full history (tip was `7d4d4aa`; plus this
+   handoff-update commit). Git CLI auth on the dev machine now works.
 2. **Open a PR and squash-merge to `main`** after review.
-3. **Fix the dashboard card** references (see above) — pending a decision on card
-   compatibility with selects.
+3. **Fix the dashboard card** references (see Dashboard section) — pending a
+   decision on whether `custom:connectmypool-card` accepts `select` entities.
 4. **Delete orphaned old switch entities** in the HA UI (optional cleanup).
 5. **Optional:** remove the inert "expose channel switches" option from
    `config_flow.py`/`const.py` (harmless; separate small commit).
-6. **Sync note:** the doc-only commit `dbc4a06` (docstring) is deployed to the live
-   share but will only load on the next HA restart; runtime behaviour is identical
-   to `c213287`, so no restart is required for it.
+6. **Sync note:** the doc-only commits (docstring `dbc4a06`, these docs) do not
+   change runtime behaviour; the live integration runs code identical to `c213287`.
+   Docs/CLAUDE.md are repo-only (HA ignores them).
 
 ## Exact next recommended steps
-1. Publish the branch (see Outstanding #1), e.g. from a terminal with GitHub creds:
-   ```
-   git clone https://github.com/Lazy-Ace/connectmypool-hacs.git cmp && cd cmp
-   git fetch "C:\AI_Local_Test\connectmypool-deploy\connectmypool-fix.bundle" \
-     fix/reliability-live-validation:fix/reliability-live-validation
-   git push origin fix/reliability-live-validation
-   ```
-2. Open PR `fix/reliability-live-validation` → `main`; review; squash-merge.
-3. Decide on and apply the dashboard card update.
-4. Optionally delete orphaned switch entities and remove the inert option.
+1. Open PR `fix/reliability-live-validation` → `main`; review; squash-merge.
+2. Decide on and apply the dashboard card update.
+3. Optionally delete orphaned switch entities and remove the inert option.
 
 ## Temporary / local paths (dev machine: Windows)
 - Local clone with full branch history:
