@@ -240,12 +240,17 @@ class ChannelModeSelect(_BaseSelect):
     """Reliable multi-state selector for a ConnectMyPool channel.
 
     ConnectMyPool only exposes a single-step *cycle* action, so reaching a
-    target mode means advancing the channel one step at a time through its fixed
-    sequence.  Each step is sent with wait_for_execution=True and then verified
-    against a fresh status read; if the controller does not land on the expected
-    next mode, the operation aborts immediately instead of cycling blindly.  A
-    per-entity lock serialises the whole operation and latest-request coalescing
-    makes rapid selections converge on the most recent target.
+    target mode means advancing the channel through its fixed sequence one step
+    at a time.  The current mode is read fresh first (the cached value can be
+    stale and mis-count steps), then exactly the required number of cycle
+    actions are sent, paced by a fixed time settle so the controller applies
+    each before the next arrives -- the cloud only acknowledges a cycle on
+    acceptance and its status lags physical execution, so time, not a status
+    read, is what reliably paces the presses.  Sending the exact count never
+    overshoots; the final state is confirmed best-effort (a warning, never an
+    error, if status has not caught up).  A per-entity lock serialises the whole
+    operation and latest-request coalescing makes rapid selections converge on
+    the most recent target.
     """
 
     def __init__(
