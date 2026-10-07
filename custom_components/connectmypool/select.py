@@ -28,7 +28,6 @@ from .cycle import (
     SIMPLE_CHANNEL_CYCLE,
     CycleError,
     cycle_steps,
-    next_in_cycle,
 )
 from .entity import ConnectMyPoolEntity
 
@@ -43,6 +42,10 @@ HEATER_PUMP_FUNCTION = 3
 # few seconds.  Each read forces a real coordinator fetch (see _refresh_and_read)
 # and we poll a handful of times, returning as soon as the expected mode shows.
 _VERIFY_DELAYS: tuple[float, ...] = (0.5, 1.0, 1.5, 2.5, 3.0)
+
+# Brief settle between consecutive cycle presses (each already waited for the
+# controller to execute via wait_for_execution=True).
+_STEP_SETTLE = 0.4
 
 
 def _is_filter_pump_channel(ch: dict[str, Any]) -> bool:
@@ -351,25 +354,39 @@ class ChannelModeSelect(_BaseSelect):
             [CHANNEL_MODES[m] for m in self._cycle],
         )
 
-        # Advance one verified step at a time.  Never send the next cycle until
-        # the previous one is confirmed to have taken effect.
+        start = current
+        # Each cycle is sent with wait_for_execution=True, so pool_action only
+        # returns once the controller has executed that step (and raises if it
+        # did not).  That response is the source of truth.  The ConnectMyPool
+        # status snapshot can lag the controller by several seconds, so it is
+        # used only for best-effort confirmation below -- never to abort a step
+        # the controller already accepted.
         for step in range(total):
-            expected = next_in_cycle(current, self._cycle)
-            _LOGGER.debug(
-                "%s: step %d/%d sending cycle, expecting '%s'",
-                self._attr_name, step + 1, total, self._label(expected),
-            )
+            _LOGGER.debug("%s: step %d/%d sending cycle", self._attr_name, step + 1, total)
             await self._send_cycle()
+            if step < total - 1:
+                await asyncio.sleep(_STEP_SETTLE)
 
-            observed = await self._verify_reaches(expected)
-
-            if observed != expected:
-                raise HomeAssistantError(
-                    f"{self._attr_name}: step {step + 1}/{total} expected "
-                    f"'{self._label(expected)}' but controller reported "
-                    f"'{self._label(observed)}'. Aborting; no further cycles sent."
-                )
-            current = observed
+        # Best-effort confirmation of the final state for the UI.
+        observed = await self._verify_reaches(desired)
+        if observed == desired:
+            _LOGGER.debug("%s: confirmed '%s'", self._attr_name, self._label(desired))
+            return
+        if observed is not None and observed in self._cycle and observed != start:
+            # Status settled on a definite but unexpected mode -> real divergence
+            # (e.g. a cycle order that differs from the assumed sequence).
+            raise HomeAssistantError(
+                f"{self._attr_name}: expected '{self._label(desired)}' but controller "
+                f"reported '{self._label(observed)}'."
+            )
+        # Status still shows the starting mode or nothing yet: it is lagging, not
+        # wrong -- the cycles were confirmed executed, so trust them and let the
+        # coordinator's next poll reconcile the displayed state.
+        _LOGGER.debug(
+            "%s: '%s' not yet reflected in status (last saw '%s'); trusting the "
+            "executed cycle actions; coordinator will reconcile",
+            self._attr_name, self._label(desired), self._label(observed),
+        )
 
     async def async_select_option(self, option: str) -> None:
         desired = next(
