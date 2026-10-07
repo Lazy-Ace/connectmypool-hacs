@@ -28,7 +28,6 @@ from .cycle import (
     SIMPLE_CHANNEL_CYCLE,
     CycleError,
     cycle_steps,
-    next_in_cycle,
 )
 from .entity import ConnectMyPoolEntity
 
@@ -45,6 +44,11 @@ HEATER_PUMP_FUNCTION = 3
 # coordinator fetch (see _refresh_and_read); we poll with backoff up to ~30s,
 # returning as soon as the expected mode appears.
 _VERIFY_DELAYS: tuple[float, ...] = (1.0, 2.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0)
+
+# Fixed settle between consecutive cycle presses.  The controller applies a
+# cycle within a few seconds, but status lags, so pace by time (not by reading
+# status) to guarantee each press is applied before the next is sent.
+_INTER_STEP_SETTLE = 12.0
 
 
 def _is_filter_pump_channel(ch: dict[str, Any]) -> bool:
@@ -326,9 +330,10 @@ class ChannelModeSelect(_BaseSelect):
         return observed
 
     async def _set_mode_locked(self, desired: int) -> None:
-        current = self._find_mode()
-        if current is None:
-            current = await self._refresh_and_read(0)
+        # Always compute from a freshly fetched status.  The coordinator's cached
+        # value can be up to a poll interval old, which would mis-count the
+        # number of cycle steps needed.
+        current = await self._refresh_and_read(0)
 
         if current not in self._cycle:
             raise HomeAssistantError(
@@ -353,37 +358,30 @@ class ChannelModeSelect(_BaseSelect):
             [CHANNEL_MODES[m] for m in self._cycle],
         )
 
-        # Advance one confirmed step at a time.  The cloud acknowledges a cycle
-        # on acceptance (not physical execution), so the next cycle must not be
-        # sent until status actually shows the expected intermediate mode; this
-        # both paces the controller correctly and confirms real progress.
+        # Send exactly the required number of cycle actions, paced far enough
+        # apart that the controller applies each one before the next arrives.
+        # The cloud only acknowledges a cycle on acceptance and its status
+        # snapshot lags physical execution unreliably, so a fixed time settle --
+        # not a status read -- is what reliably paces the presses.  Sending the
+        # exact count means the target is never overshot.
         for step in range(total):
-            expected = next_in_cycle(current, self._cycle)
-            _LOGGER.debug(
-                "%s: step %d/%d sending cycle, expecting '%s'",
-                self._attr_name, step + 1, total, self._label(expected),
-            )
+            _LOGGER.debug("%s: sending cycle %d/%d", self._attr_name, step + 1, total)
             await self._send_cycle()
+            if step < total - 1:
+                await asyncio.sleep(_INTER_STEP_SETTLE)
 
-            observed = await self._await_mode(expected)
-            if observed != expected:
-                # The cycle for this step was sent, but the ConnectMyPool cloud
-                # status has not shown the expected mode within the window.  The
-                # lag can exceed any practical timeout, so do not raise (the
-                # command may well have succeeded); stop here instead of sending
-                # further cycles, which avoids overshooting past the target.  The
-                # coordinator's next poll reconciles the displayed state.
-                _LOGGER.warning(
-                    "%s: step %d/%d to '%s' not confirmed within the expected "
-                    "time (last saw '%s'); stopping without sending further "
-                    "cycles. State will reconcile on the next status update.",
-                    self._attr_name, step + 1, total,
-                    self._label(expected), self._label(observed),
-                )
-                return
-            current = expected
-
-        _LOGGER.debug("%s: confirmed '%s'", self._attr_name, self._label(desired))
+        # Best-effort confirmation for the UI.  All required cycles have been
+        # sent, so never send more; if status has not caught up within the
+        # window, warn and let the coordinator's next poll reconcile.
+        observed = await self._await_mode(desired)
+        if observed == desired:
+            _LOGGER.debug("%s: confirmed '%s'", self._attr_name, self._label(desired))
+        else:
+            _LOGGER.warning(
+                "%s: '%s' not yet confirmed by status (last saw '%s'); the %d "
+                "cycle action(s) were sent, state will reconcile on the next poll.",
+                self._attr_name, self._label(desired), self._label(observed), total,
+            )
 
     async def async_select_option(self, option: str) -> None:
         desired = next(
