@@ -367,12 +367,20 @@ class ChannelModeSelect(_BaseSelect):
 
             observed = await self._await_mode(expected)
             if observed != expected:
-                raise HomeAssistantError(
-                    f"{self._attr_name}: step {step + 1}/{total} did not reach "
-                    f"'{self._label(expected)}' within the expected time "
-                    f"(last saw '{self._label(observed)}'). Aborting; no further "
-                    "cycles sent."
+                # The cycle for this step was sent, but the ConnectMyPool cloud
+                # status has not shown the expected mode within the window.  The
+                # lag can exceed any practical timeout, so do not raise (the
+                # command may well have succeeded); stop here instead of sending
+                # further cycles, which avoids overshooting past the target.  The
+                # coordinator's next poll reconciles the displayed state.
+                _LOGGER.warning(
+                    "%s: step %d/%d to '%s' not confirmed within the expected "
+                    "time (last saw '%s'); stopping without sending further "
+                    "cycles. State will reconcile on the next status update.",
+                    self._attr_name, step + 1, total,
+                    self._label(expected), self._label(observed),
                 )
+                return
             current = expected
 
         _LOGGER.debug("%s: confirmed '%s'", self._attr_name, self._label(desired))
