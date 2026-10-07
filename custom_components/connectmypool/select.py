@@ -37,11 +37,12 @@ _LOGGER = logging.getLogger(__name__)
 FILTER_PUMP_FUNCTION = 1
 HEATER_PUMP_FUNCTION = 3
 
-# Delays (seconds) for reading fresh status back after a cycle step executes.
-# The action is sent with wait_for_execution=True, but the cloud's poolstatus
-# can lag the controller slightly, so a short read + one delayed retry are used.
-_VERIFY_DELAY = 0.75
-_VERIFY_DELAY_RETRY = 1.5
+# Delays (seconds) between fresh status reads when verifying a cycle step.
+# The action is sent with wait_for_execution=True, so the controller has already
+# executed it, but the ConnectMyPool cloud's poolstatus snapshot can lag by a
+# few seconds.  Each read forces a real coordinator fetch (see _refresh_and_read)
+# and we poll a handful of times, returning as soon as the expected mode shows.
+_VERIFY_DELAYS: tuple[float, ...] = (0.5, 1.0, 1.5, 2.5, 3.0)
 
 
 def _is_filter_pump_channel(ch: dict[str, Any]) -> bool:
@@ -301,8 +302,26 @@ class ChannelModeSelect(_BaseSelect):
     async def _refresh_and_read(self, delay: float) -> int | None:
         if delay > 0:
             await asyncio.sleep(delay)
-        await self.coordinator.async_request_refresh()
+        # async_refresh() performs and awaits the fetch immediately;
+        # async_request_refresh() only schedules a debounced refresh and would
+        # return before fresh data is available, so the mode read back could be
+        # stale.  The API's post-action fast-poll window keeps this un-throttled.
+        await self.coordinator.async_refresh()
         return self._find_mode()
+
+    async def _verify_reaches(self, expected: int) -> int | None:
+        """Poll fresh status until the channel shows ``expected`` (or give up).
+
+        The cycle action already executed, but the cloud status can lag a few
+        seconds, so read repeatedly with backoff and return as soon as it
+        matches.  Returns the last observed mode if it never matched.
+        """
+        observed: int | None = None
+        for delay in _VERIFY_DELAYS:
+            observed = await self._refresh_and_read(delay)
+            if observed == expected:
+                return observed
+        return observed
 
     async def _set_mode_locked(self, desired: int) -> None:
         current = self._find_mode()
@@ -342,9 +361,7 @@ class ChannelModeSelect(_BaseSelect):
             )
             await self._send_cycle()
 
-            observed = await self._refresh_and_read(_VERIFY_DELAY)
-            if observed != expected:
-                observed = await self._refresh_and_read(_VERIFY_DELAY_RETRY)
+            observed = await self._verify_reaches(expected)
 
             if observed != expected:
                 raise HomeAssistantError(
